@@ -25,41 +25,38 @@
 
 void injectSharedLibrary(long mallocaddr, long freeaddr, long dlopenaddr)
 {
-	// here are the assumptions I'm making about what data will be located
-	// where at the time the target executes this code:
-	//
+	//   这里是我对目标执行此代码时数据将位于何处的假设
 	//   rdi = address of malloc() in target process
 	//   rsi = address of free() in target process
 	//   rdx = address of __libc_dlopen_mode() in target process
 	//   rcx = size of the path to the shared library we want to load
 
-	// save addresses of free() and __libc_dlopen_mode() on the stack for later use
+    // 保存free()和__libc_dlopen_mode()的地址在栈上，以便稍后使用
 	asm(
-		// rsi is going to contain the address of free(). it's going to get wiped
-		// out by the call to malloc(), so save it on the stack for later
-		"push %rsi \n"
-		// same thing for rdx, which will contain the address of _dl_open()
-		"push %rdx"
-	);
+        // rsi将包含free()的地址。它会在调用malloc()时被清除，
+        // 所以先将它保存在栈上以备后用
+        "push %rsi \n"
+        // 对于rdx也是同样，它将包含_dl_open()的地址
+        "push %rdx"
+    );
 
-	// call malloc() from within the target process
+    // 在目标进程中调用malloc()
 	asm(
-		// save previous value of r9, because we're going to use it to call malloc()
-		"push %r9 \n"
-		// now move the address of malloc() into r9
-		"mov %rdi,%r9 \n"
-		// choose the amount of memory to allocate with malloc() based on the size
-		// of the path to the shared library passed via rcx
-		"mov %rcx,%rdi \n"
-		// now call r9; malloc()
-		"callq *%r9 \n"
-		// after returning from malloc(), pop the previous value of r9 off the stack
-		"pop %r9 \n"
-		// break in so that we can see what malloc() returned
-		"int $3"
-	);
+        // 保存r9的旧值，因为我们将使用它来调用malloc()
+        "push %r9 \n"
+        // 现在将malloc()的地址移动到r9
+        "mov %rdi,%r9 \n"
+        // 根据通过rcx传递的共享库路径的大小，选择要分配的内存量
+        "mov %rcx,%rdi \n"
+        // 现在调用r9; malloc()
+        "callq *%r9 \n"
+        // 从malloc()返回后，从栈上弹出r9的旧值
+        "pop %r9 \n"
+        // break，以便我们可以看到malloc()返回了什么
+        "int $3"
+    );
 
-	// call __libc_dlopen_mode() to load the shared library
+    // 调用__libc_dlopen_mode()来加载共享库
 	asm(
 		// get the address of __libc_dlopen_mode() off of the stack so we can call it
 		"pop %rdx \n"
@@ -79,13 +76,11 @@ void injectSharedLibrary(long mallocaddr, long freeaddr, long dlopenaddr)
 		"int $3"
 	);
 
-	// call free() to free the buffer we allocated earlier.
-	//
-	// Note: I found that if you put a nonzero value in r9, free() seems to
-	// interpret that as an address to be freed, even though it's only
-	// supposed to take one argument. As a result, I had to call it using a
-	// register that's not used as part of the x64 calling convention. I
-	// chose rbx.
+	// 调用free()来释放我们之前分配的缓冲区。
+    // 注意：发现如果在r9中放入一个非零值，free()似乎会
+    // 将其解释为要释放的地址，即使它只应该取一个参数。
+    // 因此，我不得不使用不作为x64调用约定的一部分的寄存器来调用它。
+    // 我选择了rbx。
 	asm(
 		// at this point, rax should still contain our malloc()d buffer from earlier.
 		// we're going to free it, so move rax into rdi to make it the first argument to free().
@@ -106,19 +101,17 @@ void injectSharedLibrary(long mallocaddr, long freeaddr, long dlopenaddr)
 		"pop %rbx"
 	);
 
-	// we already overwrote the RET instruction at the end of this function
-	// with an INT 3, so at this point the injector will regain control of
-	// the target's execution.
+	// 我们已经在这个函数的末尾覆盖了RET指令
+    // 用一个INT 3，所以此时注入器将重新控制
+    // 目标的执行。
 }
 
 /*
- * injectSharedLibrary_end()
- *
- * This function's only purpose is to be contiguous to injectSharedLibrary(),
- * so that we can use its address to more precisely figure out how long
- * injectSharedLibrary() is.
- *
- */
+injectSharedLibrary_end()
+这个函数的唯一目的是与injectSharedLibrary()相连，
+以便我们可以使用它的地址来更精确地确定
+injectSharedLibrary()的长度。
+*/
 
 void injectSharedLibrary_end()
 {
@@ -175,23 +168,19 @@ int main(int argc, char** argv)
 	int mypid = getpid();					//获取当前进程的进程ID（PID）。
 	long mylibcaddr = getlibcaddr(mypid);	//获取当前进程的 libc 库的基址
 
-	// find the addresses of the syscalls that we'd like to use inside the
-	// target, as loaded inside THIS process (i.e. NOT the target process)
+	// 在此进程中（即非目标进程）找到想要在目标中使用的系统调用的地址
+
 	long mallocAddr = getFunctionAddress("malloc"); //获取当前进程中 malloc 函数的地址
 	long freeAddr = getFunctionAddress("free");		//获取 free 函数的地址
 	long dlopenAddr = getFunctionAddress("__libc_dlopen_mode"); //__libc_dlopen_mode这个函数用于动态加载共享库
 
-	// use the base address of libc to calculate offsets for the syscalls
-	// we want to use
+	// 使用libc的基地址来计算想要使用的系统调用的偏移量
 	long mallocOffset = mallocAddr - mylibcaddr; //计算相对libc基址的偏移
 	long freeOffset = freeAddr - mylibcaddr;
 	long dlopenOffset = dlopenAddr - mylibcaddr;
 
 	
-	// get the target process' libc address and use it to find the
-	// addresses of the syscalls we want to use inside the target process
-
-	//寻找目标进程中的相应函数地址，都是基于libc的基址的偏移量
+	// 获取目标进程的libc地址，并使用它来找到目标进程中使用的系统调用的地址
 	long targetLibcAddr = getlibcaddr(target);
 	long targetMallocAddr = targetLibcAddr + mallocOffset;
 	long targetFreeAddr = targetLibcAddr + freeOffset;
@@ -210,46 +199,37 @@ int main(int argc, char** argv)
 	// find a good address to copy code to
 	long addr = freespaceaddr(target) + sizeof(long); 		//寻找目标进程中可用于代码注入的地址
 
-	// now that we have an address to copy code to, set the target's rip to
-	// it. we have to advance by 2 bytes here because rip gets incremented
-	// by the size of the current instruction, and the instruction at the
-	// start of the function to inject always happens to be 2 bytes long.
+	// 现在我们有了一个复制代码的地址，设置目标的rip到这个地址。这里我们需要前进2个字节，因为rip会因当前指令的大小而增加，而注入函数开头的指令恰好是2个字节长
 	regs.rip = addr + 2;			//设置 rip 寄存器（指令指针），指向注入代码的起始地址。因为某些指令长度为2字节，需要调整地址以匹配实际代码开始的位置
 
-	// pass arguments to my function injectSharedLibrary() by loading them
-	// into the right registers. note that this will definitely only work
-	// on x64, because it relies on the x64 calling convention, in which
-	// arguments are passed via registers rdi, rsi, rdx, rcx, r8, and r9.
-	// see comments in injectSharedLibrary() for more details.
+	// 通过将它们加载到正确的寄存器中，向我的函数injectSharedLibrary()传递参数。注意，这绝对只适用于x64，因为它依赖于x64的调用约定，其中参数通过寄存器rdi、rsi、rdx、rcx、r8和r9传递。有关更多细节，请参见injectSharedLibrary()中的注释。
 	regs.rdi = targetMallocAddr;	//设置用于调用注入函数所需的寄存器值
 	regs.rsi = targetFreeAddr;
 	regs.rdx = targetDlopenAddr;
 	regs.rcx = libPathLength;
 	ptrace_setregs(target, &regs);	// 应用修改后的寄存器状态到目标进程
 
-	// figure out the size of injectSharedLibrary() so we know how big of a buffer to allocate. 
+
 	// 准备注入代码
+	// 计算 injectSharedLibrary() 的大小，以便知道需要分配多大的缓冲区。
 	size_t injectSharedLibrary_size = (intptr_t)injectSharedLibrary_end - (intptr_t)injectSharedLibrary; //计算 injectSharedLibrary 函数的大小（字节）这个函数包含了要注入到目标进程的代码
 
-	// also figure out where the RET instruction at the end of
-	// injectSharedLibrary() lies so that we can overwrite it with an INT 3
-	// in order to break back into the target process. note that on x64,
-	// gcc and clang both force function addresses to be word-aligned,
-	// which means that functions are padded with NOPs. as a result, even
-	// though we've found the length of the function, it is very likely
-	// padded with NOPs, so we need to actually search to find the RET.
+	// 还需要找出 injectSharedLibrary() 末尾的 RET 指令位置，以便我们可以用 INT 3 覆盖它
+	// 从而在目标进程中断返回。请注意，在 x64 上，
+	// gcc 和 clang 都强制函数地址与字对齐，
+	// 这意味着函数会用 NOPs 填充。因此，即使我们找到了函数的长度，
+	// 它很可能被 NOPs 填充，所以我们需要实际搜索来找到 RET。
 	intptr_t injectSharedLibrary_ret = (intptr_t)findRet(injectSharedLibrary_end) - (intptr_t)injectSharedLibrary; //查找 injectSharedLibrary 函数中返回指令（RET）的位置，为了在注入结束时能够设置断点
 
-	// back up whatever data used to be at the address we want to modify.
+	// 备份我们想要修改的地址原来的数据。
 	char* backup = malloc(injectSharedLibrary_size * sizeof(char)); //分配内存以备份目标进程中即将被覆盖的原始代码
 	ptrace_read(target, addr, backup, injectSharedLibrary_size);    //使用 ptrace 读取目标进程在 addr 地址的内容，并保存到 backup，为恢复原始状态做准备
 
-	// set up a buffer to hold the code we're going to inject into the
-	// target process.
+	// 设置一个缓冲区来存放我们将要注入到目标进程中的代码。
 	char* newcode = malloc(injectSharedLibrary_size * sizeof(char)); //分配内存来存放即将注入的代码
 	memset(newcode, 0, injectSharedLibrary_size * sizeof(char)); 	//初始化新代码的内存区域
 
-	// copy the code of injectSharedLibrary() to a buffer.
+	// 将 injectSharedLibrary() 的代码复制到一个缓冲区。
 	memcpy(newcode, injectSharedLibrary, injectSharedLibrary_size - 1); //将注入函数的代码复制到新代码缓冲区
 	// overwrite the RET instruction with an INT 3.
 	newcode[injectSharedLibrary_ret] = INTEL_INT3_INSTRUCTION;		 //在返回指令的位置设置 INT 3 中断指令，以便在代码执行完成后能够控制目标进程
